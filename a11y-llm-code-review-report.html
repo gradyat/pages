@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accessibility-only code review: does it catch what linters can't?</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f5f7fa;
+    --surface-2: #eef1f6;
+    --text: #1a1c1f;
+    --muted: #51555c;
+    --border: #ccd1d9;
+    --accent: #1551a8;          /* AA on white ~7:1; links, numbers, text-accents */
+    --accent-soft: #e9eefb;
+    --code-bg: #f1f2ee;
+    --shadow: 0 1px 2px rgba(20,24,33,.06), 0 6px 18px rgba(20,24,33,.06);
+    --maxw: 82ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c;
+      --surface: #1d2127;
+      --surface-2: #232831;
+      --text: #e9eaec;
+      --muted: #b3b8c0;
+      --border: #353b45;
+      --accent: #8fb4ff;
+      --accent-soft: #1d2738;
+      --code-bg: #10131a;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  /* Per-section decorative accents (filled badges carry white text — AA in both themes). */
+  main > section:nth-of-type(1)  { --sec: #1551a8; }
+  main > section:nth-of-type(2)  { --sec: #0f766e; }
+  main > section:nth-of-type(3)  { --sec: #6d28d9; }
+  main > section:nth-of-type(4)  { --sec: #9a4f06; }
+  main > section:nth-of-type(5)  { --sec: #be185d; }
+  main > section:nth-of-type(6)  { --sec: #166534; }
+  main > section:nth-of-type(7)  { --sec: #0369a1; }
+  main > section:nth-of-type(8)  { --sec: #b91c1c; }
+  main > section:nth-of-type(9)  { --sec: #7c3aed; }
+  main > section:nth-of-type(10) { --sec: #3f6212; }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-padding-top: 1rem; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 1rem/1.65 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.25rem; }
+  a { color: var(--accent); }
+  a:focus-visible, .skip:focus-visible, summary:focus-visible {
+    outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  .skip { position: absolute; left: 0; top: -3rem; background: var(--accent); color: #fff;
+    padding: .6rem 1rem; border-radius: 0 0 .4rem 0; z-index: 10; text-decoration: none; transition: top .15s ease; }
+  .skip:focus { top: 0; }
+
+  /* Header: a calm gradient rule + soft dot texture (decorative). */
+  header.page { padding: 3rem 0 1.9rem; position: relative; border-bottom: 1px solid var(--border); }
+  header.page::before { content: ""; position: absolute; inset: 0 0 auto 0; height: .5rem;
+    background: linear-gradient(90deg, #1551a8, #0f766e 35%, #6d28d9 70%, #be185d); }
+  h1 { font-size: 2.15rem; line-height: 1.15; margin: .4rem 0 0; letter-spacing: -.01em; }
+  header.page p.lede { font-size: 1.16rem; color: var(--muted); margin: .7rem 0 0; max-width: 62ch; }
+  .meta { color: var(--muted); font-size: .9rem; margin-top: 1.1rem; }
+
+  h2 { font-size: 1.5rem; margin: 2.8rem 0 .7rem; padding-bottom: .35rem;
+    border-bottom: 3px solid var(--sec); display: flex; align-items: baseline; gap: .65rem; }
+  .secnum { flex: none; align-self: center; min-width: 2rem; height: 2rem; padding: 0 .45rem;
+    display: inline-flex; align-items: center; justify-content: center; background: var(--sec);
+    color: #fff; font-size: .9rem; font-weight: 800; border-radius: .55rem; font-variant-numeric: tabular-nums; }
+  h3 { font-size: 1.13rem; margin: 1.7rem 0 .35rem; }
+
+  nav.toc { background: var(--surface); border: 1px solid var(--border); border-radius: .8rem; padding: 1.05rem 1.35rem; margin: 1.7rem 0; box-shadow: var(--shadow); }
+  nav.toc h2 { font-size: .8rem; margin: 0 0 .55rem; padding: 0; border: 0; letter-spacing: .06em; color: var(--muted); }
+  nav.toc ol { margin: 0; padding-left: 1.3rem; columns: 2; column-gap: 2rem; }
+  @media (max-width: 34rem) { nav.toc ol { columns: 1; } }
+  nav.toc li { margin: .18rem 0; }
+
+  ul.stats { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1rem; padding: 0; margin: 1.4rem 0; }
+  ul.stats li { background: var(--surface); border: 1px solid var(--border); border-radius: .85rem; padding: 1.1rem 1.15rem; box-shadow: var(--shadow); border-top: .4rem solid var(--accent); }
+  ul.stats li:nth-child(1) { border-top-color: #1551a8; }
+  ul.stats li:nth-child(2) { border-top-color: #0f766e; }
+  ul.stats li:nth-child(3) { border-top-color: #be185d; }
+  ul.stats li:nth-child(4) { border-top-color: #9a4f06; }
+  ul.stats .num { display: block; font-size: 1.95rem; font-weight: 800; color: var(--accent); line-height: 1.05; letter-spacing: -.01em; }
+  ul.stats .lab { display: block; color: var(--muted); font-size: .95rem; margin-top: .35rem; }
+
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .96rem; box-shadow: var(--shadow); border-radius: .5rem; overflow: hidden; }
+  caption { text-align: left; color: var(--muted); font-size: .9rem; padding-bottom: .55rem; }
+  th, td { border: 1px solid var(--border); padding: .55rem .7rem; text-align: right; }
+  thead th { background: var(--sec); color: #fff; border-color: var(--sec); }
+  th[scope="row"], td:first-child { text-align: left; }
+  tbody tr:nth-child(even) { background: var(--surface); }
+  .win { font-weight: 800; }
+  .win::after { content: " \2605"; }  /* star + bold: never color alone */
+
+  .sc { display: inline-block; font-size: .76rem; font-weight: 700; letter-spacing: .01em;
+    background: var(--accent-soft); color: var(--accent); padding: .08rem .45rem; border-radius: 1rem; white-space: nowrap; }
+
+  .fieldnote { margin: 1.5rem 0; padding: 1rem 1.25rem 1rem 1.4rem; background: var(--surface);
+    border: 1px solid var(--border); border-left: .45rem solid var(--sec); border-radius: .2rem .7rem .7rem .2rem; box-shadow: var(--shadow); }
+  .fieldnote .tag { font-weight: 800; color: var(--accent); }
+
+  dl.sxs { margin: 1rem 0; }
+  dl.sxs dt { font-weight: 800; margin-top: .85rem; color: var(--accent); }
+  dl.sxs dd { margin: .2rem 0 0; }
+
+  figure.ex { margin: 1.5rem 0; border: 1px solid var(--border); border-radius: .8rem; overflow: hidden; box-shadow: var(--shadow); }
+  figure.ex figcaption { background: var(--surface-2); padding: .65rem 1rem; font-weight: 700; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; }
+  figure.ex .body { padding: 1rem; }
+  .loc { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85rem; color: var(--muted); }
+  .codelabel { font-size: .78rem; letter-spacing: .06em; color: var(--muted); margin: .9rem 0 .25rem; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: .5rem; padding: .8rem .95rem; margin: .2rem 0; white-space: pre-wrap; overflow-wrap: break-word; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .88em; }
+  pre code { font-size: .82rem; line-height: 1.5; }
+  p code, li code, dd code, td code { background: var(--code-bg); padding: .05rem .3rem; border-radius: .25rem; }
+  .added { display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .04em;
+    background: var(--sec); color: #fff; padding: .03rem .4rem; border-radius: .3rem; vertical-align: .08em; }
+
+  details { border: 1px solid var(--border); border-radius: .6rem; padding: .25rem 1rem; margin: 1rem 0; background: var(--surface); }
+  summary { cursor: pointer; font-weight: 700; padding: .6rem 0; }
+  details.appendix .src { max-height: 65vh; overflow: auto; background: var(--code-bg); border: 1px solid var(--border); border-radius: .5rem; padding: .85rem 1.1rem; }
+  details.appendix .src h3, details.appendix .src h4, details.appendix .src h5, details.appendix .src h6 { margin: 1.2rem 0 .3rem; }
+  details.appendix pre { border: 0; background: transparent; padding: 0; }
+
+  .roadmap { list-style: none; padding: 0; margin: 1.2rem 0; }
+  .roadmap li { padding: .75rem 0 .75rem 2.3rem; border-bottom: 1px solid var(--border); position: relative; }
+  .roadmap li::before { content: "\2192"; position: absolute; left: .35rem; top: .75rem; color: var(--accent); font-weight: 800; font-size: 1.05rem; }
+  .roadmap strong { color: var(--accent); }
+
+  .files { list-style: none; padding: 0; }
+  .files li { padding: .4rem 0; border-bottom: 1px dotted var(--border); }
+  .files code { font-weight: 700; }
+
+  .visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+  footer.page { border-top: 1px solid var(--border); margin-top: 3.2rem; padding: 1.6rem 0 3rem; color: var(--muted); font-size: .9rem; }
+  footer.page h2 { font-size: 1rem; margin-top: 0; border: 0; padding: 0; display: block; }
+
+  @media (prefers-reduced-motion: reduce) { *, .skip { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<div class="wrap">
+<header class="page">
+  <h1>Accessibility-only code review: does it catch what linters can&rsquo;t?</h1>
+  <p class="lede">We ran an LLM code reviewer in a dedicated accessibility mode against a React testbed seeded with 79 WCAG/ARIA barriers &mdash; most of them beyond what static or runtime tooling can detect &mdash; and graded what it returned.</p>
+  <p class="meta">A practitioner-oriented accessibility-benchmark summary for engineers, compiled 2026-06-19 by Grady Thompson. Figures are LLM-graded and cross-checked, not a human gold standard &mdash; see <a href="#caveats">Caveats</a>.</p>
+</header>
+
+<nav class="toc" aria-label="On this page">
+  <h2>On this page</h2>
+  <ol>
+    <li><a href="#findings">Key findings</a></li>
+    <li><a href="#setup">What was tested</a></li>
+    <li><a href="#harness">How the harness works</a></li>
+    <li><a href="#recall">Recall</a></li>
+    <li><a href="#precision">Precision</a></li>
+    <li><a href="#grading">Trusting the grading</a></li>
+    <li><a href="#manual">The manual-review class</a></li>
+    <li><a href="#caveats">Caveats</a></li>
+    <li><a href="#roadmap">Where it goes next</a></li>
+    <li><a href="#appendix">Appendix: prompt &amp; checklist</a></li>
+  </ol>
+</nav>
+
+<main id="main">
+
+<section aria-labelledby="findings">
+  <h2 id="findings"><span class="secnum" aria-hidden="true">01</span>Key findings</h2>
+  <ul class="stats">
+    <li><span class="num">91&ndash;95%</span><span class="lab">of planted barriers found, across four Claude tiers</span></li>
+    <li><span class="num">22 / 79</span><span class="lab">caught by <code>jsx-a11y</code> + axe combined &mdash; the mode adds ~50 more per model</span></li>
+    <li><span class="num">2.5&times;</span><span class="lab">spread in <em>useful precision</em> where recall was nearly tied</span></li>
+  </ul>
+  <p>Recall barely separates the models &mdash; all four find roughly nine of every ten planted barriers, including the focus-management, live-region, and ARIA-state issues linters miss entirely. <strong>Precision is where they diverge:</strong> the noisiest tier emits ~325 comments at ~14% hallucination; the most trustworthy, ~120 at under 2%. The most practitioner-relevant result is <em>what</em> it catches &mdash; the dynamic, runtime barriers you normally only surface with a keyboard and a screen reader (see <a href="#manual">The manual-review class</a>).</p>
+</section>
+
+<section aria-labelledby="setup">
+  <h2 id="setup"><span class="secnum" aria-hidden="true">02</span>What was tested</h2>
+  <p>A React testbed plants <strong>79 accessibility barriers</strong> across 9 feature areas (dialogs, custom widgets, forms, live regions, media, contrast, page structure, a data table, SPA routing), deliberately weighted toward barriers <em>beyond</em> linter reach. Four Claude tiers reviewed the identical diff: Haiku&nbsp;4.5, Sonnet&nbsp;4.6, Opus&nbsp;4.8, and (later) Fable&nbsp;5.</p>
+  <p>The planted barriers carry real WCAG depth, not lint bait, and the hardest are patterns rather than single attributes. One feature area plants a complete broken dialog &mdash; a modal with no <code>role</code>, no focus trap, no Escape handler, no return of focus on close, and a background that stays interactive: eight linked failures that only become a barrier once you operate it. Others include a tab widget missing its APG roving-tabindex keyboard pattern, status updates that never reach a live region, a hero image painted as a CSS <code>background-image</code> on a bare <code>&lt;div&gt;</code> with no text alternative, a reading order scrambled by <code>flex-direction: row-reverse</code>, and a primary call-to-action at 1.99:1 contrast.</p>
+  <p>The models caught the great majority &mdash; about 67 of the 79 by all four &mdash; and the holdouts are telling. What survived all or most reviewers are the barriers that need cross-referencing CSS or doing arithmetic rather than reading the diff: the CSS-background hero (missed by every model), in-page action links pointing at fragments with no matching target, and that white-on-light-purple button, whose 1.99:1 ratio is a calculation rather than an observation. The review reads code well; it is weakest where a barrier lives outside the changed lines or inside a number.</p>
+  <p><strong>Anti-contamination:</strong> the checklist author, the bug authors, the reviewer, and the graders all ran with disjoint context, and the answer key lives outside the reviewed repository. The honest asterisk: <strong>the testbed and checklist are themselves LLM-authored</strong>, so the issue set reflects what an LLM thinks to plant &mdash; see <a href="#caveats">Caveats</a>.</p>
+</section>
+
+<section aria-labelledby="harness">
+  <h2 id="harness"><span class="secnum" aria-hidden="true">03</span>How the harness works, and how we adapted it</h2>
+  <p>The reviewer is <strong><a href="https://github.com/alibaba/open-code-review">open-code-review (OCR)</a></strong>, an open-source LLM review harness. It walks a git diff <strong>one file at a time</strong>. For each changed file it hands the model a system prompt (role, scope, rules) and a user message carrying that file&rsquo;s unified diff, the list of other changed files, and a review checklist dropped into a <code>{{system_rule}}</code> slot. The model then works agentically with a small set of read-only tools and emits structured findings.</p>
+
+  <h3>The review tools (all read-only, with one exception)</h3>
+  <ul>
+    <li><code>file_read</code>, <code>file_read_diff</code>, <code>file_find</code>, <code>code_search</code> &mdash; pull context from <em>unchanged</em> files (the handler behind a prop, the CSS behind a class).</li>
+    <li><code>code_comment</code> &mdash; emit a finding: severity, the WCAG success criterion, the offending code, and a suggested fix.</li>
+    <li><code>task_done</code> &mdash; end the review for that file. On larger diffs a planning pass runs first.</li>
+    <li><code>contrast_ratio</code> <span class="added">Added</span> &mdash; the only <em>computational</em> tool in the set: it parses colors, alpha-composites translucency, refuses unresolved <code>var()</code>, and returns pass/fail against the AA thresholds. We added it because LLM color arithmetic is unreliable.</li>
+  </ul>
+  <p>Strict focus rules keep the review honest: context from other files is for understanding only &mdash; a barrier the model spots <em>outside</em> the diff must not become a comment. Every finding is grounded in code the model actually fetched.</p>
+
+  <h3>The accessibility adaptation</h3>
+  <p>Three knobs turn a general reviewer into an accessibility one:</p>
+  <ul>
+    <li><strong><code>--mode accessibility</code></strong> swaps in a reviewer persona that reports <em>only</em> accessibility barriers and explicitly ignores correctness, performance, style, and tests &mdash; the deliberate inverse of a normal review.</li>
+    <li><strong>The checklist</strong> (<code>rule_docs/a11y.md</code>) is a WCAG&nbsp;2.2 AA + ARIA-APG checklist injected verbatim for every file, steering effort toward what static tools can&rsquo;t see: focus, live regions, name/role/value, reflow, reading order, route changes.</li>
+    <li><strong>Structured output</strong> (<code>--audience agent</code>) so every comment is machine-scorable against the answer key.</li>
+  </ul>
+  <p>The complete, word-for-word system prompt and checklist are in the <a href="#appendix">appendix</a> &mdash; reprinted in full, since the most useful question about a harness is exactly what it tells the model.</p>
+
+  <h3>What the harness is worth: with vs without it</h3>
+  <p>To separate the harness from the model, each tier also reviewed the <em>entire</em> diff in a single API call &mdash; no tools, no per-file loop, no planning pass. Recall collapses:</p>
+  <table>
+    <caption>Single-shot (whole diff in one call) vs the full harness, same models and checklist. Single-shot figures are the stronger &ldquo;thinking-off&rdquo; runs.</caption>
+    <thead>
+      <tr><th scope="col">Model</th><th scope="col">Single-shot (diff only)</th><th scope="col">Full harness</th><th scope="col">Harness gain</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row">Haiku 4.5</th><td>46.8%</td><td>91.1%</td><td class="win">+44 pp</td></tr>
+      <tr><th scope="row">Sonnet 4.6</th><td>65.8%</td><td>93.7%</td><td>+28 pp</td></tr>
+      <tr><th scope="row">Opus 4.8</th><td>79.7%</td><td>92.4%</td><td>+13 pp</td></tr>
+    </tbody>
+  </table>
+  <p>The smaller the model, the more the scaffolding matters (Haiku <strong>+44&nbsp;pp</strong>; even Opus, the most capable, gains <strong>+13&nbsp;pp</strong>). A counterintuitive aside for the harness-curious: turning on extended thinking in single-shot mode <em>lowered</em> recall across all three models &mdash; asked to hold ~6,300 lines in working memory at once, they overthought and emitted fewer distinct findings. Much of the result, in other words, is the harness, not raw model horsepower.</p>
+</section>
+
+<section aria-labelledby="recall">
+  <h2 id="recall"><span class="secnum" aria-hidden="true">04</span>Recall &mdash; did it find the barriers?</h2>
+  <table>
+    <caption>Recall against the 79 originally-planted barriers. &ldquo;Beyond automation&rdquo; = the 57 that neither <code>jsx-a11y</code> nor axe-core caught.</caption>
+    <thead>
+      <tr><th scope="col">Model</th><th scope="col">Found (of 79)</th><th scope="col">%</th><th scope="col">Beyond automation (of 57)</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row">Haiku 4.5</th><td>72</td><td>91.1</td><td>52</td></tr>
+      <tr><th scope="row">Sonnet 4.6</th><td>74</td><td>93.7</td><td>52</td></tr>
+      <tr><th scope="row">Opus 4.8</th><td>73</td><td>92.4</td><td>51</td></tr>
+      <tr><th scope="row">Fable 5</th><td class="win">75</td><td>94.9</td><td>&mdash;</td></tr>
+    </tbody>
+  </table>
+  <p>Static and runtime tooling caught only <strong>22 of 79</strong> combined &mdash; the mode adds roughly 50 real barriers per model on top, the core of the &ldquo;beyond-linter&rdquo; claim.</p>
+
+  <h3>How we verified &ldquo;beyond linter&rdquo;</h3>
+  <p>We didn&rsquo;t assume it &mdash; we ran the tools. <code>eslint-plugin-jsx-a11y</code> (static) and <code>axe-core</code> (runtime, on each route at initial render) were run against the same testbed, and each tool&rsquo;s output was mapped to the planted barriers:</p>
+  <table>
+    <caption>Planted barriers each detector actually caught. The two tools have zero overlap, so their union is 22.</caption>
+    <thead>
+      <tr><th scope="col">Detector</th><th scope="col">Barriers caught (of 79)</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row"><code>eslint-plugin-jsx-a11y</code> (static)</th><td>10</td></tr>
+      <tr><th scope="row">axe-core (runtime)</th><td>12</td></tr>
+      <tr><th scope="row">Either tool (no overlap)</th><td>22</td></tr>
+      <tr><th scope="row">Neither &mdash; &ldquo;beyond automation&rdquo;</th><td class="win">57</td></tr>
+    </tbody>
+  </table>
+  <p>So &ldquo;beyond automation&rdquo; isn&rsquo;t a vibe &mdash; it&rsquo;s the 57 barriers neither tool flags: runtime focus behavior, live regions, widget name/role/value, reading order. That&rsquo;s the set the mode recovers ~50 of, per model.</p>
+</section>
+
+<section aria-labelledby="precision">
+  <h2 id="precision"><span class="secnum" aria-hidden="true">05</span>Precision &mdash; is each comment trustworthy?</h2>
+  <p>Every comment was classified against the real source into <em>matched</em>, <em>real-but-uncatalogued</em>, <em>duplicate</em>, <em>wrong</em> (hallucinated), or <em>out-of-scope</em>. Here recall&rsquo;s near-tie falls apart:</p>
+  <table>
+    <caption><em>Useful precision</em> = correct, non-redundant findings &divide; comments. <em>Hallucination</em> = wrong &divide; comments. <em>Redundancy</em> = duplicates &divide; comments.</caption>
+    <thead>
+      <tr><th scope="col">Model</th><th scope="col">Comments</th><th scope="col">Useful precision</th><th scope="col">Hallucination</th><th scope="col">Redundancy</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row">Haiku 4.5</th><td>324</td><td>31.5%</td><td>13.9%</td><td>52.5%</td></tr>
+      <tr><th scope="row">Sonnet 4.6</th><td>262</td><td>49.2%</td><td>5.0%</td><td>45.4%</td></tr>
+      <tr><th scope="row">Opus 4.8</th><td>122</td><td class="win">81.1%</td><td>1.6%</td><td>16.4%</td></tr>
+      <tr><th scope="row">Fable 5</th><td>174</td><td class="win">82.8%</td><td>0%</td><td>17.2%</td></tr>
+    </tbody>
+  </table>
+  <p>Opus&nbsp;4.8 is the most trustworthy <em>deployable</em> model: high signal, ~9&times; fewer hallucinations than Haiku, little restatement. Fable&nbsp;5 edged it on every axis, then went <strong>export-restricted mid-study</strong>, so it can&rsquo;t be the reviewer you actually run; treat it as evidence the trend keeps climbing. The lesson: <strong>at recall, model choice looked like a wash; on trustworthiness it clearly is not.</strong></p>
+</section>
+
+<section aria-labelledby="grading">
+  <h2 id="grading"><span class="secnum" aria-hidden="true">06</span>Can you trust the grading?</h2>
+  <p>Every figure here is LLM-graded, so the grading itself was stress-tested two ways:</p>
+  <ul>
+    <li><strong>Independent cross-check.</strong> A different-model (Sonnet) grader re-graded the comments; per-comment agreement with the original Opus grader was Cohen&rsquo;s &kappa;&nbsp;=&nbsp;<strong>0.89</strong> for Opus and 0.82 for Fable (&ldquo;almost perfect&rdquo;). The second grader found <em>fewer</em>, not more, Opus errors &mdash; so the ranking isn&rsquo;t a same-model artifact.</li>
+    <li><strong>Human spot-check.</strong> An accessibility engineer adjudicated the 12 comments where the two graders disagreed, against the live app in DevTools: 9 fabricated / 3 real, backing the stricter grader 8 of 12. That pins Haiku&rsquo;s true hallucination rate at <strong>&asymp;9%</strong> and makes the ranking human-confirmed, not merely asserted.</li>
+  </ul>
+  <p>What stays fuzzy is the absolute magnitude of the noisiest tier&rsquo;s hallucination rate (~4&ndash;15% depending on grader). The <em>ordering</em> holds.</p>
+</section>
+
+<section aria-labelledby="manual">
+  <h2 id="manual"><span class="secnum" aria-hidden="true">07</span>The manual-review class</h2>
+
+  <p>One finding sets up the rest. A keyboard user clicks &ldquo;Previous,&rdquo; lands on page&nbsp;1, and the button they are on re-renders as <code>disabled</code> &mdash; so the browser drops focus to <code>&lt;body&gt;</code> and leaves them at the top of the page. <strong>Only Fable caught it.</strong> No linter reports it and no screenshot shows it; you find it by operating the page.</p>
+
+  <figure class="ex">
+    <figcaption>Paginator disables itself while focused &mdash; only Fable flagged it <span class="sc">SC 2.4.3</span></figcaption>
+    <div class="body">
+      <p class="loc">src/clusters/c8/Pagination.tsx:16</p>
+      <p class="codelabel">Current code</p>
+      <pre><code>&lt;button
+  type="button"
+  className="c8-page-nav"
+  onClick={() =&gt; onChange(page - 1)}
+  disabled={page === 1}
+&gt;
+  Previous
+&lt;/button&gt;</code></pre>
+      <p class="codelabel">Suggested fix &mdash; <code>aria-disabled</code> keeps the button focusable and announced</p>
+      <pre><code>&lt;button
+  type="button"
+  className="c8-page-nav"
+  onClick={() =&gt; page &gt; 1 &amp;&amp; onChange(page - 1)}
+  aria-disabled={page === 1}
+&gt;
+  Previous
+&lt;/button&gt;</code></pre>
+    </div>
+  </figure>
+
+  <p>This is the <strong>manual-review class</strong>: barriers that only appear when the page runs &mdash; where focus goes after an interaction, whether a change is announced, whether a widget reports its current state, whether DOM order matches the visual order. Static tooling cannot detect them. They are also where the models diverge most, and the split is sharpest on focus, where two different findings hide under one word:</p>
+  <ul>
+    <li><strong>Focus styling</strong> (<span class="sc">SC 2.4.7</span>) &mdash; a control has no visible <code>:focus-visible</code> outline. Mechanical; every model found many.</li>
+    <li><strong>Focus management</strong> &mdash; where focus actually lands, or is lost, after an interaction. This means following an interaction through a component&rsquo;s lifecycle, and it is where Fable stood alone.</li>
+  </ul>
+
+  <h3>Fable: focus management, end to end</h3>
+  <p>Every one of Fable&rsquo;s focus-management findings was unique to it. Four, all runtime:</p>
+  <ul>
+    <li>The paginator above &mdash; a control that <strong>disables itself while focused</strong>, dropping focus to <code>&lt;body&gt;</code> (<span class="sc">SC 2.4.3</span>).</li>
+    <li>An auto-dismiss toast that <strong>unmounts its own focused Dismiss button</strong> when the timer fires (<span class="sc">SC 2.4.3</span>).</li>
+    <li>A detail panel whose Close button <strong>destroys focus and never restores it</strong> to the row that opened it (<span class="sc">SC 2.4.3</span>).</li>
+    <li>A play/pause control whose state <strong>desyncs from the media element&rsquo;s own events</strong>, so it lies once the video ends or is paused by the OS (<span class="sc">SC 4.1.2</span>).</li>
+  </ul>
+  <p>Fable was also the only model to flag SPA route changes that never set <code>document.title</code> or move focus &mdash; across five separate views.</p>
+
+  <h3>What the other models uniquely caught</h3>
+  <p>Each tier surfaced real barriers the answer key missed, and each had finds no other model reported:</p>
+  <ul>
+    <li><strong>Opus</strong> &mdash; the most concise reviewer, and the one with the fewest uniques. Its single unique focus-management find: a <strong>sticky order summary that can overlap focused form fields</strong> on a narrow viewport (<span class="sc">SC 2.4.11</span>). Also only Opus: a billing-period switch and a result count that update with <strong>no live region</strong> (<span class="sc">SC 4.1.3</span>).</li>
+    <li><strong>Sonnet</strong> &mdash; the broadest sweep, 58 uncatalogued finds. Only Sonnet caught <strong>repeated article cards with no accessible name</strong> and an aside whose <code>aria-label</code> merely repeats its visible heading (<span class="sc">SC 4.1.2</span>); icon fills that <strong>disappear in forced-colors mode</strong> (<span class="sc">SC 1.4.11</span>); and a dismiss instruction that is <strong>pointer-only</strong> (&ldquo;Tap outside the image,&rdquo; <span class="sc">SC 3.3.2</span>).</li>
+    <li><strong>Haiku</strong> &mdash; its uniques are focus <em>styling</em>, not management: missing <code>:focus-visible</code> outlines on tabs, icon buttons, and primary buttons (<span class="sc">SC 2.4.7</span>), several caught only by Haiku. It also flagged a transition with no <code>prefers-reduced-motion</code> guard (<span class="sc">SC 2.3.3</span>). It reported no unique focus-management finding.</li>
+  </ul>
+
+  <h3>What they shared</h3>
+  <p>The overlaps are real, and worth stating &mdash; this is not a one-model show:</p>
+  <ul>
+    <li>All four flagged the toast that appears with <strong>no live region</strong> (<span class="sc">SC 4.1.3</span>) and explained who it silences.</li>
+    <li>A <strong>sticky header that hides focused controls</strong> on reverse-tab was caught independently by Sonnet, Opus, and Fable (in different components).</li>
+    <li><strong>In-page anchor links that scroll without moving focus</strong> were caught by Haiku and Opus.</li>
+    <li>Identical accessible names on repeated <strong>&ldquo;Add to cart&rdquo;</strong> buttons, and unlabeled <code>&times;</code> close buttons, were caught by Haiku, Sonnet, and Opus.</li>
+  </ul>
+
+  <p>Every tier reaches the manual-review class &mdash; the barriers you would otherwise only catch by hand. They divide on focus. The others mostly reported missing focus <em>outlines</em>, plus a few shared management cases; Fable was the only model to consistently catch where focus goes wrong at runtime: disabled while focused, unmounted while focused, never restored. That is the hardest part of a manual audit to automate, and the part that most rewards a reviewer that can reason about an interaction over time.</p>
+</section>
+
+<section aria-labelledby="caveats">
+  <h2 id="caveats"><span class="secnum" aria-hidden="true">08</span>Caveats &amp; threats to validity</h2>
+  <p>Stated plainly, because they bound every number above:</p>
+  <ul>
+    <li><strong>LLM-authored testbed and checklist.</strong> Both the planted barriers and the WCAG checklist were written by Claude sub-agents (in mutual isolation), not a human expert &mdash; so the issue set probably under-represents the messiest real-world barriers.</li>
+    <li><strong>Shared model family.</strong> Authors, reviewer, and graders are all Claude. Disjoint context blocks information leakage but not shared priors; a non-Claude reviewer/grader is the cleanest future cross-check.</li>
+    <li><strong>LLM grading, no full human gold set.</strong> Cross-checked (&kappa;&nbsp;=&nbsp;0.89) and spot-checked in DevTools, but not exhaustively human-graded. Read recall as &plusmn;1&ndash;2 issues.</li>
+    <li><strong>Single run, one app shape.</strong> No repeats, so 1-issue gaps are within noise; one React testbed, so cluster-level results may not generalize.</li>
+    <li><strong>Fable&nbsp;5 is export-restricted.</strong> Its result is a single, now-unrepeatable run (cross-checked, but pre-contrast-tool only).</li>
+  </ul>
+</section>
+
+<section aria-labelledby="roadmap">
+  <h2 id="roadmap"><span class="secnum" aria-hidden="true">09</span>Where it goes next</h2>
+  <p>The open questions that would turn &ldquo;promising&rdquo; into &ldquo;trustworthy enough to adopt&rdquo;:</p>
+  <ul class="roadmap">
+    <li><strong>False positives on clean code.</strong> Add correct widgets and zero-issue files &mdash; does it wrongly flag accessible code? Flagging a correct <code>aria-pressed</code> toggle is worse than missing one.</li>
+    <li><strong>Fix apply-and-reverify.</strong> Apply each suggested fix, re-run axe + a targeted check &mdash; does the fix actually resolve the barrier without introducing a new one? A confidently-wrong fix is actively harmful.</li>
+    <li><strong>Generic-prompt ablation.</strong> Re-run with a bare &ldquo;audit against WCAG 2.2 AA&rdquo; prompt vs the full checklist. If recall barely moves, the model already knows this; if it drops, the checklist is the active ingredient.</li>
+    <li><strong>Checklists as a tunable surface.</strong> Beyond a bare &ldquo;audit against WCAG 2.2 AA&rdquo; prompt vs the full checklist: point the mode at a team&rsquo;s own accessibility guidelines or design-system rules, and build the checklist empirically &mdash; start basic and add specifics only where evals show the model actually misses, so the list closes real gaps instead of restating what the model already knows.</li>
+    <li><strong>More deterministic tools.</strong> Extend the contrast tool with a CSS/computed-style resolver and a render/axe bridge, so the agent can query runtime state instead of inferring it.</li>
+    <li><strong>Split-context diffs.</strong> PRs where the barrier lives in the interaction between changed and unchanged code &mdash; the real test of the context-retrieval tools.</li>
+    <li><strong>A non-Claude cross-vendor reviewer.</strong> Run Gemini / Codex through the same harness to break the all-Claude-family confound.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="appendix">
+  <h2 id="appendix"><span class="secnum" aria-hidden="true">10</span>Appendix: the exact prompt &amp; checklist</h2>
+  <p>Reprinted verbatim &mdash; the most direct way to show what the harness actually asks of the model. Expand to read.</p>
+
+  <details class="appendix">
+    <summary>The harness prompts (system prompt, per-file message, planning pass)</summary>
+    <div class="src">
+<h3>D.1 — MAIN_TASK system prompt</h3>
+<h4>Role</h4>
+<p>You are a senior web accessibility (a11y) reviewer. You audit code changes for a web UI against WCAG 2.1 and WCAG 2.2 Level AA, the WAI-ARIA Authoring Practices Guide (APG), and real assistive-technology behavior — screen readers (NVDA, JAWS, VoiceOver), keyboard-only operation, voice control, OS zoom/reflow, and reduced motion. Your feedback combines precise WCAG analysis with concrete, contextual code fixes.</p>
+<p>You are working in an IDE with editor concepts for open files and an integrated terminal. The user's developed code is stored in the IDE's staging area.</p>
+<p>Before users commit staged code to remote repositories, they will send you tasks to help them audit accessibility. Each time a user sends a task, it will be placed in &lt;user_task&gt;, and you will use &lt;tool&gt; to interact with the real world when executing tasks.</p>
+<p>Please keep your responses concise and objective.</p>
+<h4>Capabilities</h4>
+<ul>
+<li>Think step by step progressively.</li>
+<li>First understand the code changes to be reviewed. Code changes are provided in Unified Diff format, where lines starting with <code>-</code> indicate deleted code, lines starting with <code>+</code> indicate added code, consecutive <code>-</code> and <code>+</code> lines represent modified code, and other lines represent unchanged code.</li>
+<li>Be objective and neutral, make judgments based on facts, the WCAG specification, and observable assistive-technology behavior; avoid subjective assumptions. When the context is unclear, use tools to obtain contextual information rather than judging based on assumptions.</li>
+<li>For the current code changes, report accessibility barriers in newly added code, each with a concrete fix.</li>
+<li>Avoid commenting on accessible code or unchanged code.</li>
+<li>Avoid commenting on deleted code; deleted code serves only as reference context.</li>
+</ul>
+<h4>Scope — Accessibility ONLY</h4>
+<ul>
+<li>Report ONLY accessibility barriers. This is the deliberate inverse of a general-purpose code reviewer.</li>
+<li>Explicitly IGNORE correctness, performance, security, code style, naming, tests, and general code quality UNLESS the issue directly manifests as an accessibility barrier for a user of assistive technology.</li>
+<li>Do not comment on logic bugs, refactoring opportunities, or non-functional metadata. If it does not block or degrade access for an assistive-technology user, it is out of scope.</li>
+</ul>
+<h4>Go Beyond Static Linters</h4>
+<p>Assume eslint-plugin-jsx-a11y and axe static rules already ran. Focus your effort on the barriers those tools cannot detect, including:</p>
+<ul>
+<li>Focus management: focus traps in dialogs/menus, returning focus to the trigger on close, setting initial focus, preserving a visible focus indicator (:focus-visible), and avoiding programmatic focus loss.</li>
+<li>Custom widgets: the programmatic name, role, and value plus the full keyboard-interaction pattern for custom components (tabs, menus, comboboxes, dialogs, disclosures, sliders, treegrids) measured against the relevant ARIA APG pattern.</li>
+<li>Dynamic content: announcement of asynchronously updated content via appropriate live regions (aria-live, role=status/alert), and avoiding redundant or missed announcements.</li>
+<li>Errors and status: programmatic association of error and status messages with their fields (aria-describedby, aria-invalid) and reliable announcement to screen-reader users.</li>
+<li>Color: color contrast for text and non-text/UI components, and not conveying information by color alone (use-of-color).</li>
+<li>Motion: respecting prefers-reduced-motion and avoiding animation that could trigger vestibular disorders.</li>
+<li>Reflow and zoom: support for 400% zoom / reflow without loss of content or function, and text-spacing overrides without clipping.</li>
+<li>Order: reading/DOM order matching the visual/logical order, including tabindex misuse.</li>
+<li>Structure: heading hierarchy and landmark/region structure for navigation.</li>
+<li>SPA navigation: focus handling and document title updates on client-side route changes.</li>
+<li>Target size: adequate pointer target size for interactive controls (WCAG 2.2).</li>
+<li>Accessible name computation: correct accessible names including dynamically generated ids referenced by aria-labelledby/aria-describedby and for/id associations.</li>
+</ul>
+<h4>Finding Requirements</h4>
+<p>Each finding you report MUST state:</p>
+<ol>
+<li>The concrete accessibility barrier in the added/changed code.</li>
+<li>The affected assistive-technology user (e.g., screen-reader, keyboard-only, low-vision/zoom, voice-control, reduced-motion).</li>
+<li>The specific WCAG success criterion by number and name (e.g., 4.1.2 Name, Role, Value; 2.4.7 Focus Visible).</li>
+<li>A concrete code fix.</li>
+</ol>
+<h4>Strict Focus Rules</h4>
+<ul>
+<li>Context tools are for understanding purposes only. Findings from other files must NOT become the subject of your comments.</li>
+<li>If you discover a potential issue in another file while gathering context, ignore it — your task is limited to the current diffs.</li>
+</ul>
+<h4>Reply limit</h4>
+<ul>
+<li>If the current accessibility review task is complete, call <code>task_done</code> to end the task.</li>
+<li>If an accessibility barrier has been identified and confirmed, call the <code>code_comment</code> tool to provide feedback.</li>
+<li>If additional context is needed to confirm the barrier, call the appropriate context tool.</li>
+</ul>
+
+<h3>D.2 — MAIN_TASK user message (rendered once per file)</h3>
+<p><em>A literal template &mdash; the <code>{{…}}</code> placeholders are filled in at run time.</em></p>
+<pre><code>// The following is the list of other files changed in this update.
+&lt;other_changed_files&gt;
+{{change_files}}
+&lt;/other_changed_files&gt;
+
+&lt;current_file_path&gt;{{current_file_path}}&lt;/current_file_path&gt;
+
+&lt;current_file_diff&gt;
+{{diff}}
+&lt;/current_file_diff&gt;
+
+Current time in the real world: {{current_system_date_time}}
+
+&lt;user_task&gt;
+### Requirement Background (Optional)
+{{requirement_background}}
+
+### Review Checklist
+{{system_rule}}
+
+### Review Plan (Optional)
+{{plan_guidance}}
+
+Now please review the code changes in &lt;current_file_diff&gt;
+&lt;/user_task&gt;</code></pre>
+<h3>D.3 — PLAN_TASK system prompt (planning pass; runs when a file’s changes exceed the line threshold)</h3>
+<p>You are an expert in web accessibility (a11y) review task planning. You have access to a set of tools for retrieving relevant context about code changes, and your responsibility is to analyze those changes and produce a structured accessibility review plan.</p>
+<h4>Core Responsibilities</h4>
+<p>Analyze code change content, identify potential accessibility barriers (against WCAG 2.1 and 2.2 Level AA, the WAI-ARIA APG, and real assistive-technology behavior), and plan appropriate tool-calling strategies for each barrier.</p>
+<h4>Tool Descriptions</h4>
+<p>{{plan_tools}}</p>
+<h4>Output Format</h4>
+<p>Strictly follow the JSON format below. Do not include any additional explanatory text:</p>
+<p>{</p>
+<p>  "change_summary": "A brief description of the purpose and scope of this code change",</p>
+<p>  "issues": [</p>
+<p>    {</p>
+<p>      "severity": "high|medium|low",</p>
+<p>      "description": "A clear description of the specific accessibility barrier, the affected assistive-technology user, and the relevant WCAG success criterion for this risk point",</p>
+<p>      "tool_guidance": [</p>
+<p>        {</p>
+<p>          "name": "Tool name",</p>
+<p>          "reason": "Explain the purpose of calling this tool and its relevance to the current barrier",</p>
+<p>          "arguments": "Invocation arguments"</p>
+<p>        }</p>
+<p>      ]</p>
+<p>    }</p>
+<p>  ]</p>
+<p>}</p>
+<h4>Analysis Rules</h4>
+<ol>
+<li><strong>Scope</strong>: Only analyze newly added and modified code; ignore deleted code. Report ONLY accessibility barriers — ignore correctness, performance, security, style, naming, tests, and general code quality unless they directly manifest as an accessibility barrier.</li>
+<li><strong>Ordering</strong>: The issues list must be sorted by severity in descending order (high → medium → low)</li>
+<li><strong>Severity Definitions (by user impact)</strong>:</li>
+</ol>
+<ul>
+<li><code>high</code>: Blocks a task for assistive-technology users — e.g., a control unreachable or unoperable by keyboard, a custom widget with no accessible name/role, a focus trap, or dynamic content/errors that are never announced.</li>
+<li><code>medium</code>: Degrades the experience but a determined assistive-technology user can still complete the task — e.g., poor focus management, weak status announcements, reading-order mismatches, or borderline contrast.</li>
+<li><code>low</code>: Minor friction or best-practice gaps — e.g., suboptimal heading hierarchy, missing reduced-motion handling for minor animation, or non-ideal target size with workarounds.</li>
+</ul>
+<ol>
+<li><strong>Tool Usage</strong>: Tools are for reference purposes only and must not be actually invoked; describe the calling intent within tool_guidance</li>
+<li><strong>Description Requirements</strong>: Each description must cover three dimensions — barrier location, the nature of the accessibility barrier (with the affected assistive-technology user and WCAG success criterion), and potential user impact</li>
+</ol>
+
+    </div>
+  </details>
+
+  <details class="appendix">
+    <summary>The WCAG 2.2 checklist injected for every file (<code>rule_docs/a11y.md</code>)</summary>
+    <div class="src">
+<h3>Web Accessibility (a11y) Review Checklist</h3>
+<p>A practical, diff-oriented checklist for auditing web-UI changes against <strong>WCAG 2.1 / 2.2 Level A &amp; AA</strong> and the <strong>WAI-ARIA Authoring Practices Guide (APG)</strong>. Prioritize findings that static linters (<code>eslint-plugin-jsx-a11y</code>) and axe static scans cannot catch: runtime focus behavior, keyboard interaction patterns, dynamic name/role/value correctness, live-region announcements, and route-change handling. Cite the success criterion (SC) where relevant.</p>
+<p>When reviewing a diff, reason about the <strong>rendered runtime behavior</strong>, not just the static markup. Ask: "Can a keyboard-only user do this? Will a screen reader announce this? Does focus go somewhere sensible?"</p>
+<hr>
+<h4>1. Perceivable</h4>
+<h5>1.1 Text Alternatives (SC 1.1.1 Non-text Content, Level A)</h5>
+<ul>
+<li><strong>Images</strong>: Every <code>&lt;img&gt;</code> has an <code>alt</code>. Informative images describe content/function; decorative images use <code>alt=""</code> (empty, not missing). Flag <code>alt</code> that restates nearby visible text (redundant) or includes "image of"/"photo of".</li>
+<li><strong>Icon-only buttons/links</strong>: Check for an accessible name. A button containing only an SVG/icon font/<code>&lt;i&gt;</code> with no text needs <code>aria-label</code> (or visually-hidden text). Flag icon buttons with no name, or a name that describes the icon ("magnifying glass") instead of the action ("Search").</li>
+<li><strong>SVG</strong>: Informative inline <code>&lt;svg&gt;</code> needs <code>role="img"</code> + <code>aria-label</code>/<code>aria-labelledby</code> (or a <code>&lt;title&gt;</code> referenced correctly). Decorative <code>&lt;svg&gt;</code> needs <code>aria-hidden="true"</code> and <code>focusable="false"</code> (IE/edge focus quirk). Flag SVGs with a <code>&lt;title&gt;</code> but no <code>role="img"</code> (inconsistent SR support).</li>
+<li><strong>Background/CSS images</strong> that convey information need a text equivalent elsewhere.</li>
+<li><strong><code>alt</code> on functional images</strong> (image used as a link/button) must describe the destination/action, not the picture.</li>
+<li><strong>Emoji / pictographic characters</strong> conveying meaning need an accessible label or surrounding text.</li>
+</ul>
+<h5>1.2 Time-based Media (SC 1.2.x, Level A/AA)</h5>
+<ul>
+<li><code>&lt;video&gt;</code> with audio needs captions (1.2.2). Prerecorded video needs audio description or a text alternative (1.2.5). <code>&lt;audio&gt;</code> needs a transcript (1.2.1).</li>
+<li>Flag <code>&lt;video&gt;</code>/<code>&lt;audio&gt;</code> with <code>autoplay</code> (see also 1.4.2 and 2.2.2).</li>
+<li>Check for <code>&lt;track kind="captions"&gt;</code> on video where applicable.</li>
+</ul>
+<h5>1.3 Info and Relationships (SC 1.3.1, Level A)</h5>
+<ul>
+<li><strong>Semantic structure</strong>: Information conveyed visually (lists, headings, tables, grouping) must be in the markup. Flag <code>&lt;div&gt;</code>/<code>&lt;span&gt;</code> soup used where <code>&lt;ul&gt;/&lt;ol&gt;/&lt;li&gt;</code>, <code>&lt;table&gt;</code>, <code>&lt;h1&gt;-&lt;h6&gt;</code>, <code>&lt;button&gt;</code>, <code>&lt;nav&gt;</code>, etc. belong.</li>
+<li><strong>Headings</strong>: Use real heading elements for headings; do not fake them with styled <code>&lt;div&gt;</code>/<code>&lt;p&gt;</code> or bold text. Conversely, do not use heading tags purely for visual sizing.</li>
+<li><strong>Form field/label association</strong>: see Section 3.</li>
+<li><strong>Lists</strong>: groups of related items use list markup so SRs announce item count and position.</li>
+<li><strong>Data tables</strong>: see Section 7.</li>
+<li><strong>Emphasis/structure</strong>: relationships implied by spacing/color/position alone are not programmatically determinable — add semantics.</li>
+</ul>
+<h5>1.3.2 Meaningful Sequence (Level A) — DOM order vs visual order</h5>
+<ul>
+<li><strong>Reading/DOM order must match visual order.</strong> Flag CSS that reorders content visually away from DOM order: <code>flex-direction: row-reverse</code>/<code>column-reverse</code>, <code>order:</code>, <code>grid</code> placement, absolute positioning, <code>float</code>. A keyboard/SR user reads DOM order; if visual order differs, sequence and tab order become confusing.</li>
+<li>Flag content visually moved but left in a misleading DOM position (e.g., a "next" button before "previous" in the DOM).</li>
+</ul>
+<h5>1.3.4 Orientation (AA) &amp; 1.3.5 Identify Input Purpose (AA)</h5>
+<ul>
+<li><strong>Orientation (1.3.4)</strong>: Don't lock to portrait/landscape unless essential. Flag CSS/JS that forces a single orientation.</li>
+<li><strong>Autocomplete (1.3.5)</strong>: Inputs collecting known user data need correct <code>autocomplete</code> tokens (<code>name</code>, <code>email</code>, <code>tel</code>, <code>street-address</code>, <code>cc-number</code>, <code>one-time-code</code>, etc.). Flag missing/incorrect <code>autocomplete</code> on personal-data fields.</li>
+</ul>
+<h5>1.4 Distinguishable</h5>
+<h6>Color &amp; Contrast</h6>
+<ul>
+<li><strong>Use of color (SC 1.4.1, Level A)</strong>: Color must not be the only means of conveying information, indicating an action, prompting a response, or distinguishing a visual element. Flag: required fields marked only by red color; errors shown only via red text/border; status (success/error) by color alone; chart series distinguished only by color; links distinguished from body text only by color (need underline or other non-color cue, especially within text blocks). Good fix: add text, icon, shape, underline, or pattern.</li>
+<li><strong>Text contrast (SC 1.4.3, Level AA)</strong>: Normal text &gt;= 4.5:1; large text (&gt;=24px, or &gt;=18.66px bold) &gt;= 3:1. Check new/changed text and background colors, including hover/focus/visited/disabled-but-meaningful states, placeholder text, text over images/gradients, and theme tokens. Flag low-contrast gray-on-gray, light text on light backgrounds.</li>
+<li><strong>Non-text contrast (SC 1.4.11, Level AA)</strong>: UI component boundaries and states need &gt;= 3:1 against adjacent colors — input borders, button outlines, toggle/checkbox/radio indicators, focus indicators, icons that convey meaning, and chart/graphical objects required to understand content. Flag near-invisible input borders or focus rings.</li>
+</ul>
+<h6>Visual Presentation / Reflow / Zoom / Spacing</h6>
+<ul>
+<li><strong>Resize text (SC 1.4.4, AA)</strong>: Text must scale to 200% without loss of content/function. Flag fixed pixel heights on text containers that would clip, or <code>font-size</code> in <code>px</code> on containers that can't grow.</li>
+<li><strong>Reflow (SC 1.4.10, AA)</strong>: Content must reflow to a 320 CSS px viewport width (and 256px height) without 2-D scrolling. Flag fixed widths, <code>white-space: nowrap</code> on large content, horizontal-scroll layouts, <code>min-width</code> on containers, viewport units that break narrow screens. Tables/maps/code are exceptions.</li>
+<li><strong>Text spacing (SC 1.4.12, AA)</strong>: No loss of content when users override line-height (1.5x), paragraph spacing (2x), letter-spacing (0.12em), word-spacing (0.16em). Flag fixed-height containers with <code>overflow:hidden</code> that would clip text, or <code>!important</code> line-heights.</li>
+<li><strong>Images of text (SC 1.4.5, AA)</strong>: Use real text, not images of text, except logos.</li>
+<li><strong>Content on hover or focus (SC 1.4.13, AA)</strong>: Tooltips/popovers shown on hover/focus must be <strong>dismissable</strong> (Esc without moving pointer), <strong>hoverable</strong> (pointer can move onto the content without it disappearing), and <strong>persistent</strong> (stays until dismissed/hover-away/no longer valid). Flag tooltips that vanish on mouseleave of the trigger, can't be dismissed with Esc, or appear only on <code>:hover</code> (not keyboard <code>:focus</code>).</li>
+</ul>
+<h6>Motion / Flashing</h6>
+<ul>
+<li><strong>Reduced motion (SC 2.3.3 Animation from Interactions, AAA — but treat as best practice)</strong>: Non-essential animation/transition/parallax/auto-scroll should respect <code>@media (prefers-reduced-motion: reduce)</code>. Flag new CSS animations/transitions or JS-driven motion (autoplay carousels, parallax, scroll-jacking, large transforms) added without a reduced-motion guard.</li>
+<li><strong>Three flashes (SC 2.3.1, Level A)</strong>: Nothing flashes more than 3 times/second. Flag rapid flashing/strobing.</li>
+</ul>
+<hr>
+<h4>2. Operable</h4>
+<h5>2.1 Keyboard Accessible (SC 2.1.1 Keyboard, Level A) — highest-value, linter-missed</h5>
+<ul>
+<li><strong>Everything operable by keyboard.</strong> Any element with a click/pointer handler must be reachable and operable by keyboard. Flag:</li>
+<li><code>onClick</code> on a non-interactive element (<code>&lt;div&gt;</code>, <code>&lt;span&gt;</code>, <code>&lt;li&gt;</code>, <code>&lt;img&gt;</code>) <strong>without</strong> <code>role</code> + <code>tabIndex={0}</code> + a keydown handler for Enter/Space. The right fix is almost always a real <code>&lt;button&gt;</code>/<code>&lt;a&gt;</code>.</li>
+<li>Custom controls that respond to mouse but not keyboard (drag-only sliders, hover-only menus, swipe-only carousels with no button alternative).</li>
+<li><code>&lt;a&gt;</code> without <code>href</code> used as a button (not focusable/activatable) — use <code>&lt;button&gt;</code>.</li>
+<li><strong>Native semantics first</strong>: prefer <code>&lt;button&gt;</code>, <code>&lt;a href&gt;</code>, <code>&lt;input&gt;</code>, <code>&lt;select&gt;</code> over re-implemented ARIA widgets.</li>
+<li><strong>No keyboard trap (SC 2.1.2, Level A)</strong>: Focus must be able to leave any component via keyboard. Flag custom focus traps that don't release on Esc, embedded widgets/iframes that capture focus, or modal traps with no exit.</li>
+<li><strong>Character key shortcuts (SC 2.1.4, Level A)</strong>: Single-character shortcuts (no modifier) must be remappable, turn-off-able, or active only on focus. Flag global single-key handlers.</li>
+</ul>
+<h5>2.1 Focus Order &amp; Tabindex misuse</h5>
+<ul>
+<li><strong>Tab order (SC 2.4.3, Level A)</strong> follows a meaningful sequence matching visual/reading order. Flag layouts where DOM order produces a confusing tab path.</li>
+<li><strong><code>tabindex</code> misuse</strong> (linters miss the *semantic* problem):</li>
+<li><code>tabIndex</code> &gt; 0 is an anti-pattern — it hijacks the global tab order. Flag any positive tabindex.</li>
+<li><code>tabIndex={0}</code> on genuinely non-interactive content (plain text, headings, containers) adds noise to tab order — usually wrong.</li>
+<li><strong>Missing <code>tabIndex={-1}</code></strong> where you need programmatic-only focus (e.g., a heading/region you <code>.focus()</code> after a route change, or roving-tabindex inactive items).</li>
+<li>Roving tabindex: in composite widgets (toolbar, radiogroup, tablist, menu, grid), exactly one item is <code>tabIndex={0}</code> and the rest <code>tabIndex={-1}</code>, with arrow keys moving focus. Flag widgets where every child is independently tabbable (should be one tab stop).</li>
+<li><strong>Don't remove focusability</strong> from interactive elements (<code>tabIndex={-1}</code> on a real button/link the user must reach).</li>
+</ul>
+<h5>2.2 Enough Time (SC 2.2.1 / 2.2.2, Level A)</h5>
+<ul>
+<li><strong>Timing (2.2.1)</strong>: Time limits must be adjustable/extendable/turn-off-able (sessions, countdowns, auto-advancing steps). Flag hard timeouts with no warning/extension.</li>
+<li><strong>Pause, Stop, Hide (2.2.2)</strong>: Auto-updating, moving, blinking, or scrolling content lasting &gt;5s and shown alongside other content (carousels, tickers, auto-refresh, marquees, animated GIFs) needs a pause/stop/hide control. Flag autoplay carousels/tickers with no pause.</li>
+</ul>
+<h5>2.4 Navigable</h5>
+<h6>Focus Management for Dialogs / Overlays (APG Dialog Pattern) — critical, linter-missed</h6>
+<p>For any modal dialog, drawer, popover, sheet, lightbox, or full-screen overlay, verify the full lifecycle:</p>
+<ul>
+<li><strong>Initial focus on open</strong>: focus moves into the dialog — to the first interactive element, the dialog container (<code>tabIndex={-1}</code> + <code>role="dialog"</code>), or a sensible heading. Flag dialogs that open without moving focus (focus stays behind on the trigger).</li>
+<li><strong>Focus trap while open</strong>: Tab/Shift+Tab cycle only within the dialog; focus cannot escape to the page behind. Flag missing trap.</li>
+<li><strong>Return focus on close</strong>: focus returns to the element that opened the dialog (or a logical successor if that element is gone). Flag focus dumped to <code>&lt;body&gt;</code> on close.</li>
+<li><strong>Esc closes</strong> the dialog (non-alert dialogs). Flag missing Escape handling.</li>
+<li><strong>Background inert</strong>: content behind the modal is hidden from AT and not interactive — use the <code>inert</code> attribute or <code>aria-hidden="true"</code> on the background (and not on the dialog). Native <code>&lt;dialog showModal&gt;</code> and <code>popover</code> get this for free; hand-rolled overlays often miss it.</li>
+<li><strong>Roles/markup</strong>: <code>role="dialog"</code> (or <code>alertdialog</code> for confirmations) with <code>aria-modal="true"</code>, plus an accessible name via <code>aria-labelledby</code> (pointing to the title) or <code>aria-label</code>. <code>aria-describedby</code> for body if needed.</li>
+<li><strong>Scroll lock</strong> should not break keyboard access or hide focus.</li>
+</ul>
+<h6>Focus-visible &amp; Focus Indicators</h6>
+<ul>
+<li><strong>Never remove focus outlines without replacement.</strong> Flag <code>outline: none</code> / <code>outline: 0</code> / <code>:focus { outline: none }</code> with no visible alternative.</li>
+<li>Prefer <code>:focus-visible</code> so keyboard focus is shown without showing rings on mouse click. Custom focus styles must meet <strong>SC 2.4.7 Focus Visible (Level A)</strong> and have &gt;= 3:1 contrast (1.4.11).</li>
+<li><strong>WCAG 2.2 — Focus Not Obscured (Minimum) (SC 2.4.11, AA)</strong>: the focused element must not be entirely hidden by sticky headers/footers, toolbars, or cookie banners. Flag sticky/fixed overlays that can cover the focused control, and <code>scroll-margin</code>/scroll-into-view gaps.</li>
+<li><strong>WCAG 2.2 — Focus appearance</strong>: ensure indicators aren't clipped by <code>overflow: hidden</code>.</li>
+</ul>
+<h6>Page &amp; Route Structure</h6>
+<ul>
+<li><strong>Skip link (SC 2.4.1 Bypass Blocks, Level A)</strong>: a "Skip to main content" link as the first focusable element, targeting <code>&lt;main&gt;</code>/<code>#main</code> (which must be focusable). Flag missing skip link on pages with repeated nav, or skip links that are <code>display:none</code> (must become visible on focus).</li>
+<li><strong>Landmarks</strong>: one <code>&lt;main&gt;</code>, plus <code>&lt;nav&gt;</code>, <code>&lt;header&gt;</code>/<code>banner</code>, <code>&lt;footer&gt;</code>/<code>contentinfo</code>, <code>&lt;aside&gt;</code>/<code>complementary</code> as appropriate. All content should sit within a landmark. Multiple same-type landmarks (e.g., two <code>&lt;nav&gt;</code>) need distinguishing <code>aria-label</code>/<code>aria-labelledby</code>. Flag redundant roles on native elements (<code>&lt;nav role="navigation"&gt;</code>) and landmark misuse.</li>
+<li><strong>Page title (SC 2.4.2, Level A)</strong>: each page/view has a unique, descriptive <code>&lt;title&gt;</code>. In SPAs, the title must <strong>update on route change</strong>. Flag route changes that don't update <code>document.title</code>.</li>
+<li><strong>Headings &amp; labels (SC 2.4.6, AA)</strong> are descriptive. <strong>Heading hierarchy</strong>: a single <code>&lt;h1&gt;</code>, no skipped levels (don't jump h2 -&gt; h4). Flag heading-level jumps and multiple/zero h1.</li>
+<li><strong>Link purpose (SC 2.4.4, Level A)</strong>: link text makes sense (avoid bare "click here"/"read more"/"learn more" repeated across the page) — supplement with context or <code>aria-label</code>/visually-hidden text. Flag multiple identical link texts going to different destinations.</li>
+<li><strong>Multiple ways (SC 2.4.5, AA)</strong>: more than one way to find pages (nav, search, sitemap) — site-level.</li>
+<li><strong>WCAG 2.2 — Consistent Help (SC 3.2.6, A)</strong> and <strong>Redundant Entry (SC 3.3.7, A)</strong>: help mechanisms in consistent order; don't force re-entry of info already provided in the same process (autofill/carry-forward).</li>
+</ul>
+<h6>SPA Route-Change Focus &amp; Announcement — frequently missed</h6>
+<ul>
+<li>On client-side navigation, <strong>manage focus</strong>: move focus to the new view's <code>&lt;h1&gt;</code>/main heading or a focusable <code>&lt;main&gt;</code> (<code>tabIndex={-1}</code>), so SR/keyboard users land in the new content rather than being stranded at the old position or at the top with no context.</li>
+<li><strong>Announce the navigation</strong>: update <code>document.title</code> and/or announce via a polite live region (route name / page loaded). SR users get no automatic page-load announcement in SPAs.</li>
+<li>Don't auto-<code>.focus()</code> an arbitrary control on every render (causes focus thrash); scope focus moves to genuine navigations/state changes.</li>
+</ul>
+<h5>2.5 Input Modalities</h5>
+<ul>
+<li><strong>Pointer gestures (SC 2.5.1, A)</strong>: multipoint/path-based gestures (pinch, swipe, drag-path) need a single-pointer alternative. Flag swipe-only or pinch-only interactions.</li>
+<li><strong>Pointer cancellation (SC 2.5.2, A)</strong>: activate on <code>up</code> (click), not <code>down</code>; allow abort by moving off before release. Flag actions firing on <code>pointerdown</code>/<code>mousedown</code>.</li>
+<li><strong>Label in Name (SC 2.5.3, A)</strong>: the accessible name must contain the visible label text (so voice-control users can target it). Flag <code>aria-label</code> that omits or contradicts the visible text (e.g., button reads "Submit" but <code>aria-label="Send form"</code>). The visible text should be at the start of the accessible name.</li>
+<li><strong>Motion actuation (SC 2.5.4, A)</strong>: device-motion-triggered actions (shake) need a UI alternative and can be disabled.</li>
+<li><strong>WCAG 2.2 — Dragging Movements (SC 2.5.7, AA)</strong>: any drag operation (sortable lists, sliders, drag-and-drop, drag-to-reorder, map panning) needs a single-pointer non-drag alternative (e.g., click/tap buttons, keyboard). Flag drag-only interactions.</li>
+<li><strong>WCAG 2.2 — Target Size (Minimum) (SC 2.5.8, AA)</strong>: interactive targets are &gt;= 24x24 CSS px, or have &gt;= 24px spacing between adjacent targets (exceptions: inline links in text, user-agent-default controls, essential). Flag small icon buttons, tight icon rows, close buttons, pagination dots, dense toolbars.</li>
+</ul>
+<hr>
+<h4>3. Understandable</h4>
+<h5>3.1 Readable</h5>
+<ul>
+<li><strong>Language of page (SC 3.1.1, A)</strong>: <code>&lt;html lang="..."&gt;</code> is set and correct. Flag missing/empty/wrong <code>lang</code>.</li>
+<li><strong>Language of parts (SC 3.1.2, AA)</strong>: passages in a different language get <code>lang</code> on the wrapping element. Flag mixed-language content without <code>lang</code> overrides.</li>
+</ul>
+<h5>3.2 Predictable</h5>
+<ul>
+<li><strong>On focus / On input (SC 3.2.1 / 3.2.2, A)</strong>: focusing or changing a field's value must not cause an unexpected context change (auto-submit, auto-navigation, reload). Flag <code>onChange</code> that navigates or submits on a <code>&lt;select&gt;</code> without a confirm button, or focus handlers that move focus elsewhere unexpectedly.</li>
+<li><strong>Consistent navigation/identification (SC 3.2.3 / 3.2.4, AA)</strong>: repeated components stay in consistent order; same-function components are labeled consistently.</li>
+</ul>
+<h5>3.3 Input Assistance — Forms (linters miss the *dynamic* parts)</h5>
+<ul>
+<li><strong>Labels (SC 3.3.2 Labels or Instructions, A; SC 4.1.2 Name)</strong>: every form control has a programmatic label.</li>
+<li>Prefer <code>&lt;label htmlFor={id}&gt;</code> wrapping or referencing the control, or an associated <code>&lt;label&gt;</code>. Flag inputs labeled only by an adjacent <code>&lt;div&gt;</code>/placeholder.</li>
+<li><strong>Placeholder is NOT a label</strong> — it disappears on input and often fails contrast. Flag placeholder-only fields.</li>
+<li>When using <code>aria-labelledby</code>/<code>aria-label</code>, ensure the referenced ids exist and resolve (see Section 4). <code>aria-labelledby</code> overrides <code>&lt;label&gt;</code> and visible text — verify it's not silently dropping the visible label.</li>
+<li><strong>Dynamic ids</strong>: in lists/loops/components, <code>htmlFor</code>/<code>id</code>/<code>aria-*</code> id references must be unique and correctly paired per instance (use generated unique ids, e.g. <code>useId</code>). Flag duplicated static ids across repeated rows and mismatched <code>htmlFor</code>/<code>id</code> pairs.</li>
+<li><strong>Grouping (SC 1.3.1)</strong>: related controls (radio groups, checkbox groups, related fields like address) are grouped in <code>&lt;fieldset&gt;</code> with <code>&lt;legend&gt;</code>, or <code>role="group"</code>/<code>radiogroup</code> with <code>aria-labelledby</code>. Flag radio/checkbox sets with no group label — the group's question is otherwise lost.</li>
+<li><strong>Required &amp; invalid state (SC 4.1.2; SC 3.3.1)</strong>:</li>
+<li>Required fields: use <code>required</code>/<code>aria-required="true"</code>, not just a visual asterisk. If <code>*</code> is used, explain it.</li>
+<li>Invalid fields: set <code>aria-invalid="true"</code> when in error (and remove it when fixed). Flag visual-only error styling.</li>
+<li><strong>Error identification &amp; association (SC 3.3.1 Error Identification, A; SC 3.3.3 Error Suggestion, AA)</strong>:</li>
+<li>Error messages are programmatically linked to their field via <code>aria-describedby</code> pointing at the message element's id. Flag errors rendered visually near a field but not associated.</li>
+<li>Error text identifies the field and how to fix it (not just "Invalid"). Provide suggestions where known.</li>
+<li><strong>Announce errors</strong>: on submit/validation, errors must reach SR users — move focus to the first invalid field (and/or to an error summary that is focused), or announce via a live region (<code>role="alert"</code>/<code>aria-live</code>). Flag validation that only re-renders red borders with no focus move or announcement.</li>
+<li><strong>Status / success messages</strong>: confirmation ("Saved", "3 results", "Item added to cart") must be announced via a live region or <code>role="status"</code> — see Section 5. Flag UI that updates silently.</li>
+<li><strong>Error prevention (SC 3.3.4, AA)</strong>: for legal/financial/data-deletion actions, provide reversal, check, or confirmation.</li>
+<li><strong>WCAG 2.2 — Accessible Authentication (SC 3.3.8, AA)</strong>: don't require a cognitive function test (memorizing/transcribing) for login without an alternative; allow paste and password managers. Flag blocked paste on password/OTP fields, disabled autocomplete on auth fields.</li>
+</ul>
+<hr>
+<h4>4. Robust</h4>
+<h5>4.1 Compatible — Name, Role, Value (SC 4.1.2, Level A) — the core of ARIA review</h5>
+<ul>
+<li><strong>Role</strong>: custom widgets expose the correct <code>role</code>. Flag wrong/conflicting roles (e.g., <code>role="button"</code> on an <code>&lt;a href&gt;</code>), abstract roles used directly, and roles that require specific parent/child structure used in isolation (<code>role="tab"</code> outside a <code>tablist</code>, <code>role="option"</code> outside <code>listbox</code>, <code>role="menuitem"</code> outside <code>menu</code>, <code>role="row"/"gridcell"</code> outside <code>grid</code>/<code>table</code>).</li>
+<li><strong>Accessible name computation</strong> — verify it actually resolves and isn't empty/duplicated:</li>
+<li><code>aria-labelledby</code> / <code>aria-describedby</code> ids <strong>must exist and be unique</strong> in the DOM at runtime. Flag references to ids that don't exist, are conditionally rendered away, or are duplicated (multiple elements with the same id → first/ambiguous wins).</li>
+<li>Name precedence: <code>aria-labelledby</code> &gt; <code>aria-label</code> &gt; native label/content &gt; <code>title</code>. Don't combine in ways that hide the intended name.</li>
+<li><code>aria-label</code>/<code>aria-labelledby</code> only work on elements with a valid role that supports naming — they're ignored on generic <code>&lt;div&gt;</code>/<code>&lt;span&gt;</code> with no role and on many static elements. Flag <code>aria-label</code> on a plain <code>&lt;div&gt;</code> expected to be announced.</li>
+<li>Multiple <code>aria-labelledby</code> ids are concatenated in id order — verify the resulting string reads correctly.</li>
+<li>Don't override a good visible name with a worse <code>aria-label</code> (also SC 2.5.3 Label in Name).</li>
+<li><strong>Value/state</strong>: stateful widgets keep ARIA state in sync with reality. Flag:</li>
+<li>Toggles/switches without <code>aria-pressed</code>/<code>aria-checked</code>, or values that never update on interaction.</li>
+<li><code>aria-expanded</code> missing or stale on disclosures/accordions/menus/comboboxes (must reflect open/closed).</li>
+<li><code>aria-selected</code> (tabs/options), <code>aria-current</code> (current page/step), <code>aria-checked</code> (checkbox/radio/switch), <code>aria-disabled</code> vs native <code>disabled</code>, <code>aria-valuenow/min/max/text</code> (sliders/progress).</li>
+<li><code>aria-hidden="true"</code> on an element that contains focusable children (creates "phantom" focus stops the SR can't see) — flag. Also flag <code>aria-hidden</code> on the root/<code>&lt;body&gt;</code> or on focused content.</li>
+<li><strong>Don't put <code>aria-hidden="true"</code> on a focusable element.</strong> (WCAG 2.2 references this anti-pattern.)</li>
+<li><strong>Parsing / valid ARIA (SC 4.1.1 was removed in WCAG 2.2, but still check)</strong>:</li>
+<li>No invalid ARIA attribute names/values; no ARIA attributes on roles that don't support them; required ARIA attributes present for the role (e.g., <code>role="checkbox"</code> needs <code>aria-checked</code>; <code>role="combobox"</code> needs <code>aria-expanded</code> + <code>aria-controls</code>).</li>
+<li>Don't use <code>role="presentation"</code>/<code>aria-hidden</code> on focusable/interactive content.</li>
+<li>Unique <code>id</code> attributes (duplicate ids break label/description/<code>aria-controls</code>).</li>
+<li><strong>Status messages (SC 4.1.3, Level AA)</strong>: status changes that don't receive focus must be announced via live regions — see Section 5.</li>
+</ul>
+<hr>
+<h4>5. Live Regions &amp; Dynamic Content Announcements (SC 4.1.3 Status Messages, AA) — heavily linter-missed</h4>
+<ul>
+<li><strong>Announce content that appears without a focus change</strong>: search result counts, filter results, "Loading…/Loaded", form save status, validation errors, toast/snackbar notifications, async-loaded sections, cart/badge counts, sort/pagination changes.</li>
+<li><strong>Choose the right mechanism</strong>:</li>
+<li><code>role="status"</code> / <code>aria-live="polite"</code> for non-urgent updates (results, saved, counts).</li>
+<li><code>role="alert"</code> / <code>aria-live="assertive"</code> for urgent/error messages (interrupts).</li>
+<li><code>aria-busy="true"</code> during loading of a region.</li>
+<li><strong>Live region must exist in the DOM before the content changes.</strong> A region inserted at the same time as its message often won't announce. Flag conditionally-mounted live regions; the container should be present and empty, then have text injected.</li>
+<li><strong>Don't over-announce</strong>: avoid <code>assertive</code>/<code>role="alert"</code> for routine updates (interrupts the user). Avoid putting <code>aria-live</code> on large/rapidly-changing containers (announces everything).</li>
+<li><strong>Toasts/snackbars</strong>: ensure they're in a live region and that auto-dismiss timing respects 2.2.1 (and they're reachable/dismissable by keyboard if interactive).</li>
+<li><strong>Loading spinners</strong>: a purely visual spinner with no <code>aria-live</code>/status text is silent to SR users — flag.</li>
+</ul>
+<hr>
+<h4>6. Custom Widgets — APG Keyboard Patterns (almost entirely linter-missed)</h4>
+<p>When the diff introduces or modifies a custom interactive widget, verify it matches the APG pattern: correct roles <strong>and</strong> the expected keyboard interaction. Native elements are preferred; if a custom widget is built, it must be complete.</p>
+<ul>
+<li><strong>Disclosure / show-hide</strong>: trigger is a <code>&lt;button&gt;</code> with <code>aria-expanded</code> (true/false) and <code>aria-controls</code> pointing to the toggled region. Enter/Space toggles. Flag missing <code>aria-expanded</code> updates.</li>
+<li><strong>Accordion</strong>: each header is a <code>&lt;button&gt;</code> inside a heading element, with <code>aria-expanded</code> and <code>aria-controls</code>; panels labeled by their header. Up/Down arrows move between headers (optional), Enter/Space toggles.</li>
+<li><strong>Tabs (tablist/tab/tabpanel)</strong>: <code>role="tablist"</code> &gt; <code>role="tab"</code> (one <code>tabIndex={0}</code>, rest <code>-1</code>, roving), each tab <code>aria-selected</code> + <code>aria-controls</code>; <code>role="tabpanel"</code> with <code>tabIndex={0}</code> and <code>aria-labelledby</code> to its tab. Arrow keys switch tabs (Left/Right for horizontal), Home/End jump. Flag tabs implemented as buttons with no tablist semantics or no arrow-key support.</li>
+<li><strong>Menu / menu button</strong>: <code>role="menu"</code> + <code>role="menuitem"</code>; trigger <code>aria-haspopup</code> + <code>aria-expanded</code>. Arrow keys navigate, Enter/Space activate, Esc closes and returns focus, typeahead optional. Note: a list of links/navigation is <strong>not</strong> a <code>menu</code> — <code>role="menu"</code> is for application-style command menus; misusing it changes SR behavior. Flag nav dropdowns wrongly using <code>role="menu"</code>.</li>
+<li><strong>Listbox</strong>: <code>role="listbox"</code> + <code>role="option"</code> with <code>aria-selected</code>; arrow keys move, Home/End, typeahead; single/multi select semantics (<code>aria-multiselectable</code>).</li>
+<li><strong>Combobox (APG 1.2 pattern)</strong>: <code>role="combobox"</code> input with <code>aria-expanded</code>, <code>aria-controls</code> (to listbox), <code>aria-activedescendant</code> (to highlighted option) or DOM focus management. Down arrow opens, arrows move active option, Enter selects, Esc closes. Flag autocomplete/typeahead inputs missing combobox semantics and <code>aria-activedescendant</code> sync.</li>
+<li><strong>Slider</strong>: <code>role="slider"</code> with <code>aria-valuenow/min/max</code> (and <code>aria-valuetext</code> for non-numeric), focusable, Arrow keys adjust, Home/End to extremes, PageUp/Down for large steps. Flag drag-only sliders (also 2.5.7).</li>
+<li><strong>Switch / Toggle</strong>: <code>role="switch"</code> (or checkbox) with <code>aria-checked</code>; Space toggles.</li>
+<li><strong>Tooltip</strong>: <code>role="tooltip"</code> referenced by the trigger's <code>aria-describedby</code>; shows on focus and hover; Esc dismisses (1.4.13).</li>
+<li><strong>Tree, Grid, Treegrid, Carousel, Date picker, Toolbar</strong>: verify against the specific APG pattern (roles + roving tabindex + documented keys). Flag partial implementations (roles without keyboard, or keyboard without roles).</li>
+<li><strong>General widget checks</strong>: Enter/Space activation on custom buttons; Esc to close/cancel popups; arrow-key navigation within composite widgets; visible focus on the active item; state attributes update on every interaction.</li>
+</ul>
+<hr>
+<h4>7. Tables, Lists &amp; Data</h4>
+<ul>
+<li><strong>Data tables</strong>: use <code>&lt;table&gt;</code> with <code>&lt;th scope="col"&gt;</code>/<code>&lt;th scope="row"&gt;</code>, a <code>&lt;caption&gt;</code> (or <code>aria-label</code>) describing the table, and <code>&lt;thead&gt;/&lt;tbody&gt;</code>. Flag layout done with <code>&lt;table&gt;</code> (use CSS) and data shown in <code>&lt;div&gt;</code> grids without table semantics.</li>
+<li><strong>Complex tables</strong>: use <code>headers</code>/<code>id</code> association when scope is insufficient (multi-level headers).</li>
+<li><strong>Sortable columns</strong>: the sortable header control is a <code>&lt;button&gt;</code> inside the <code>&lt;th&gt;</code>, with <code>aria-sort="ascending|descending|none"</code> on the <code>&lt;th&gt;</code> reflecting current state, updated on sort. Announce result reorder if needed. Flag clickable <code>&lt;th&gt;</code> with no <code>aria-sort</code> and no button.</li>
+<li><strong>Lists</strong>: use <code>&lt;ul&gt;/&lt;ol&gt;/&lt;dl&gt;</code>; don't strip list semantics with <code>role="list"</code> removed via <code>list-style:none</code> workarounds inconsistently (Safari/VoiceOver drops list role when <code>list-style:none</code> — re-add <code>role="list"</code> if needed).</li>
+</ul>
+<hr>
+<h4>8. Quick Diff Red-Flags (scan for these patterns)</h4>
+<ul>
+<li><code>onClick</code> on <code>div</code>/<code>span</code>/<code>li</code>/<code>img</code> without role + <code>tabIndex</code> + key handler.</li>
+<li><code>&lt;a&gt;</code> with no <code>href</code> (or <code>href="#"</code>) acting as a button.</li>
+<li><code>outline: none</code> / <code>outline: 0</code> without a <code>:focus-visible</code> replacement.</li>
+<li><code>tabIndex</code> with a positive value; <code>tabIndex={-1}</code> on something users must reach.</li>
+<li><code>aria-hidden="true"</code> wrapping focusable/interactive content.</li>
+<li><code>placeholder</code> used as the only label; missing <code>&lt;label&gt;</code>/<code>htmlFor</code>.</li>
+<li>Duplicated static <code>id</code>s in loops; <code>aria-labelledby</code>/<code>describedby</code>/<code>controls</code> referencing non-existent ids.</li>
+<li><code>aria-label</code> on a roleless <code>&lt;div&gt;</code>/<code>&lt;span&gt;</code>; <code>aria-label</code> that contradicts visible text.</li>
+<li>Icon-only <code>&lt;button&gt;</code>/<code>&lt;a&gt;</code> with no accessible name.</li>
+<li><code>&lt;img&gt;</code> missing <code>alt</code>; decorative SVG without <code>aria-hidden</code>; informative SVG without <code>role="img"</code>+name.</li>
+<li>New modal/drawer/popover without initial focus, focus trap, Esc-to-close, return focus, and background inert.</li>
+<li>New async/results/status UI with no live region (<code>role="status"</code>/<code>alert</code>/<code>aria-live</code>).</li>
+<li>SPA route change with no <code>document.title</code> update and no focus move/announcement.</li>
+<li>New CSS animation/transition/autoplay without <code>prefers-reduced-motion</code> guard.</li>
+<li>Color-only signaling (required, error, status, link, chart).</li>
+<li>Hardcoded low-contrast colors; invisible focus rings; near-invisible borders.</li>
+<li>Fixed heights/widths/<code>overflow:hidden</code> that clip on zoom/reflow/text-spacing.</li>
+<li>Form validation that toggles red styling but doesn't set <code>aria-invalid</code>, associate errors via <code>aria-describedby</code>, or move focus/announce.</li>
+<li>Radio/checkbox group with no <code>fieldset</code>/<code>legend</code> or <code>role="group"</code> + name.</li>
+<li>Small tap targets (&lt; 24px) packed tightly (2.5.8); drag-only interactions (2.5.7).</li>
+<li>Custom tabs/menu/combobox/accordion with roles but no arrow-key/Esc/Home-End handling, or missing <code>aria-expanded</code>/<code>aria-selected</code>/<code>aria-current</code> updates.</li>
+</ul>
+<hr>
+<h4>Review Output Guidance</h4>
+<p>For each finding, state: the specific location/element, why it fails (cite the SC or APG pattern), the impact (which users — keyboard, screen reader, low vision, motor), and a concrete fix. Prefer native HTML solutions over ARIA. Distinguish blocking failures (Level A/AA violations) from best-practice improvements. When behavior depends on runtime (focus, announcements), say what to verify with a keyboard and a screen reader, since it can't be confirmed from static markup alone.</p>
+
+    </div>
+  </details>
+</section>
+
+</main>
+
+<footer class="page">
+  <h2>Where to find more</h2>
+  <p>This summary was written by AI (Claude) and refined through review with the author. The full evidence base lives alongside it (filenames, not links, since this page travels on its own):</p>
+  <ul class="files">
+    <li><code>a11y-mode-experiment-report.md</code> &mdash; the complete report (recall, precision, calibration, tooling).</li>
+    <li><code>cross-model-findings.md</code> &mdash; every model&rsquo;s actual review comments on the manual-review class, side by side.</li>
+    <li><code>ROADMAP.md</code> &mdash; the full backlog and what&rsquo;s validated vs pending.</li>
+    <li><code>precision*.json</code> / <code>benchmark*.json</code> &mdash; machine-readable metrics.</li>
+    <li><code>answer-key.json</code> &mdash; the ground-truth answer key: each barrier with its file, WCAG criterion, and description.</li>
+  </ul>
+  <p style="margin-top:1.2rem">Figures are LLM-graded and cross-checked &mdash; directional evidence, not certified measurement.</p>
+</footer>
+</div>
+</body>
+</html>
